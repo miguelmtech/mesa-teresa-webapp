@@ -299,12 +299,35 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const ch = supabase.channel('public:orders')
+    const ch = supabase.channel('public:live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, payload => {
         setShiftOrders(prev => {
+          if (payload.eventType === 'DELETE') return prev.filter(x => x.id !== payload.old.id);
           const o = payload.new;
-          if (prev.find(x => x.id === o.id)) return prev.map(x => x.id === o.id ? o : x);
-          return [o, ...prev];
+          const mapped = {
+            id: o.id, folio: o.folio, items: o.items, total: o.total, type: o.order_type,
+            ref: o.reference, note: o.note, status: o.status, paid: o.paid,
+            createdAt: o.created_at, payment: o.payment_method, cashReceived: o.cash_received,
+            change: o.change, tip: o.tip, user: o.user_name, shiftId: o.shift_id, discount: o.discount
+          };
+          if (prev.find(x => x.id === o.id)) return prev.map(x => x.id === o.id ? mapped : x);
+          return [mapped, ...prev];
+        });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, payload => {
+        setProducts(prev => {
+          if (payload.eventType === 'DELETE') return prev.filter(x => x.id !== payload.old.id);
+          const p = payload.new;
+          if (prev.find(x => x.id === p.id)) return prev.map(x => x.id === p.id ? p : x);
+          return [...prev, p];
+        });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, payload => {
+        setInventory(prev => {
+          if (payload.eventType === 'DELETE') return prev.filter(x => x.id !== payload.old.id);
+          const i = { ...payload.new, minStock: payload.new.min_stock };
+          if (prev.find(x => x.id === i.id)) return prev.map(x => x.id === i.id ? i : x);
+          return [...prev, i];
         });
       }).subscribe();
     return () => supabase.removeChannel(ch);
