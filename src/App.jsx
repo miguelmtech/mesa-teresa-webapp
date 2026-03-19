@@ -291,7 +291,7 @@ export default function App() {
       if (rFolio?.[0]) setFolioCounter(rFolio[0].current_val);
       if (rMg?.length > 0) {
         const o = {};
-        rMg.forEach(m => o[m.id] = { name: m.name, type: m.type, options: m.options });
+        rMg.forEach(m => o[m.id] = { id: m.id, name: m.name, type: m.type, options: m.options });
         setMgs(o);
       }
     }
@@ -2581,7 +2581,7 @@ function ModGroupsEditor({ mgs, setMgs }) {
         ))}
         <div className="div" />
         <div className="fx g8">
-          <input className="inp f1" placeholder="Nuevo grupo..." value={newGName} onChange={e => setNewGName(e.target.value)} style={{ fontSize: 12 }} />
+          <input className="inp f1" placeholder="Ej. Tamaño, Leches..." value={newGName} onChange={e => setNewGName(e.target.value)} style={{ fontSize: 12 }} />
           <button className="btn btn-sage btn-sm" onClick={() => {
             if (!newGName) return;
             const id = newGName.toLowerCase().replace(/\s+/g,"_");
@@ -2594,7 +2594,15 @@ function ModGroupsEditor({ mgs, setMgs }) {
       </div>
       {g && (
         <div className="card">
-          <div style={{ fontWeight: 700, marginBottom: 8, color: "var(--bark)" }}>{g.name}</div>
+          <div className="fx g8" style={{ marginBottom: 12, alignItems: "center" }}>
+            <div style={{ fontWeight: 700, color: "var(--bark)", flex: 1 }}>{g.name}</div>
+            <button className="btn btn-outline btn-sm" style={{ padding: "4px 8px", fontSize: 11, color: "var(--terra)", borderColor: "var(--terra)" }} onClick={() => {
+              if (!confirm(`¿Estás seguro de eliminar el grupo "${g.name}"? Toda la configuración se borrará.`)) return;
+              const nm = { ...mgs }; delete nm[g.id]; setMgs(nm);
+              supabase.from('modifier_groups').delete().eq('id', g.id).then();
+              setSel(Object.keys(nm)[0]);
+            }}>🗑️ Eliminar grupo</button>
+          </div>
           <div className="fx g8 mb12">
             <button className={`mb-btn ${g.type === "single" ? "sel" : ""}`} onClick={() => { setMgs(p => ({ ...p, [g.id]: { ...g, type: "single" } })); supabase.from('modifier_groups').update({ type: "single" }).eq('id', g.id).then(); }}>1 opción</button>
             <button className={`mb-btn ${g.type === "multi" ? "sel" : ""}`} onClick={() => { setMgs(p => ({ ...p, [g.id]: { ...g, type: "multi" } })); supabase.from('modifier_groups').update({ type: "multi" }).eq('id', g.id).then(); }}>Varios</button>
@@ -2608,8 +2616,8 @@ function ModGroupsEditor({ mgs, setMgs }) {
           ))}
           <div className="div" />
           <div className="fx g8">
-            <input className="inp f1" placeholder="Nombre..." value={newOptN} onChange={e => setNewOptN(e.target.value)} style={{ fontSize: 12 }} />
-            <input className="inp" type="number" placeholder="+$" value={newOptP} onChange={e => setNewOptP(e.target.value)} style={{ width: 70, fontSize: 12 }} />
+            <input className="inp f1" placeholder="Nueva opción (Ej. Grande)" value={newOptN} onChange={e => setNewOptN(e.target.value)} style={{ fontSize: 12 }} />
+            <input className="inp" type="number" placeholder="+$0" value={newOptP} onChange={e => setNewOptP(e.target.value)} style={{ width: 60, fontSize: 12 }} />
             <button className="btn btn-sage btn-sm" onClick={() => {
               if (!newOptN) return;
               const opt = { id: `o${Date.now()}`, name: newOptN, priceAdj: +newOptP };
