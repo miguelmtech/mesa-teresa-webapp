@@ -291,12 +291,27 @@ export default function App() {
 
   const addOrder = async (order) => {
     setShiftOrders(prev => [order, ...prev]);
-    await supabase.from('orders').insert([order]);
+    const dbOrder = {
+      id: order.id, folio: order.folio, items: order.items, total: order.total,
+      order_type: order.type, reference: order.ref, note: order.note, status: order.status,
+      paid: order.paid, created_at: order.createdAt, payment_method: order.payment,
+      cash_received: order.cashReceived, change: order.change, tip: order.tip,
+      user_name: order.user, shift_id: order.shiftId, discount: order.discount
+    };
+    await supabase.from('orders').insert([dbOrder]);
   };
 
   const updateOrder = async (id, changes) => {
     setShiftOrders(prev => prev.map(o => o.id === id ? { ...o, ...changes } : o));
-    await supabase.from('orders').update(changes).eq('id', id);
+    const dbChanges = {};
+    if (changes.status) dbChanges.status = changes.status;
+    if (changes.paid !== undefined) dbChanges.paid = changes.paid;
+    if (changes.payment) dbChanges.payment_method = changes.payment;
+    if (changes.cashReceived !== undefined) dbChanges.cash_received = changes.cashReceived;
+    if (changes.change !== undefined) dbChanges.change = changes.change;
+    if (changes.tip !== undefined) dbChanges.tip = changes.tip;
+    if (changes.discount !== undefined) dbChanges.discount = changes.discount;
+    await supabase.from('orders').update(dbChanges).eq('id', id);
   };
 
   const canSee = (t) => {
@@ -507,6 +522,10 @@ function ShiftGate({ shift, setShift, allShifts, setAllShifts, shiftOrders, user
       openingCash: Number(openCash) || 0, status: "open", date: isoDate(),
     };
     setShift(s); setOpening(false); setOpenCash("");
+    supabase.from('shifts').insert({
+      id: s.id, opened_by: s.openedBy, opened_at: s.openedAt, opened_at_ts: s.openedAtTs,
+      opening_cash: s.openingCash, status: s.status, shift_date: s.date
+    }).then();
   });
 
   const buildCorte = () => {
@@ -700,6 +719,10 @@ function ShiftClosePanel({ shift, setShift, shiftOrders, allShifts, setAllShifts
     setCorte(c);
     setConfirmed(true);
     setPin(""); setPinErr(false);
+    supabase.from('shifts').update({
+      closed_by: closedShift.closedBy, closed_at: closedShift.closedAt, closed_at_ts: closedShift.closedAtTs,
+      status: "closed", corte: c
+    }).eq('id', closedShift.id).then();
   };
 
   if (!shift) {
@@ -3493,11 +3516,14 @@ function ConfigScreen({ mgs, setMgs, user, refreshUsers, usersVersion }) {
     if (userModal.mode === "add") {
       const nextId = Math.max(...USERS.map(u => u.id)) + 1;
       const color = ["#5c7fc4","#a05ca0","#5ca07c","#c45c7f","#7c5ca0"][nextId % 5];
-      USERS.push({ id: nextId, name: uForm.name.trim(), role: uForm.role, pin: uForm.pin, color });
+      const nu = { id: nextId, name: uForm.name.trim(), role: uForm.role, pin: uForm.pin, color };
+      USERS.push(nu);
+      supabase.from('users').insert(nu).then();
     } else {
       const idx = USERS.findIndex(u => u.id === userModal.user.id);
       if (idx !== -1) {
         USERS[idx] = { ...USERS[idx], name: uForm.name.trim(), role: uForm.role, pin: uForm.pin };
+        supabase.from('users').update({ name: USERS[idx].name, role: USERS[idx].role, pin: USERS[idx].pin }).eq('id', USERS[idx].id).then();
       }
     }
     refreshUsers();
@@ -3512,7 +3538,9 @@ function ConfigScreen({ mgs, setMgs, user, refreshUsers, usersVersion }) {
     if (admins.length === 1 && USERS.find(u => u.id === deleteConfirm)?.role === "admin") {
       setAdminPinErr("No puedes eliminar el único admin del sistema."); return;
     }
-    USERS.splice(USERS.findIndex(u => u.id === deleteConfirm), 1);
+    const tgt = deleteConfirm;
+    USERS.splice(USERS.findIndex(u => u.id === tgt), 1);
+    supabase.from('users').delete().eq('id', tgt).then();
     refreshUsers();
     setDeleteConfirm(null); setAdminPin(""); setAdminPinErr("");
   };
