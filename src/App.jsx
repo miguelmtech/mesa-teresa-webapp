@@ -257,22 +257,43 @@ export default function App() {
 
   useEffect(() => {
     async function initSupabase() {
-      const [{ data: p }, { data: inv }, { data: ord }, { data: s }, { data: u }] = await Promise.all([
+      const [{ data: p }, { data: inv }, { data: ord }, { data: s }, { data: u }, { data: exp }, { data: fexp }, { data: pur }, { data: costs }, { data: rMg }, { data: rFolio }] = await Promise.all([
         supabase.from('products').select('*'),
         supabase.from('inventory').select('*'),
         supabase.from('orders').select('*'),
         supabase.from('shifts').select('*').order('id', { ascending: false }).limit(20),
-        supabase.from('users').select('*')
+        supabase.from('users').select('*'),
+        supabase.from('expenses').select('*'),
+        supabase.from('fixed_expenses').select('*'),
+        supabase.from('purchases').select('*'),
+        supabase.from('cost_history').select('*'),
+        supabase.from('modifier_groups').select('*'),
+        supabase.from('folio_counter').select('*')
       ]);
       if (p?.length > 0) setProducts(p);
-      if (inv?.length > 0) setInventory(inv);
+      if (inv?.length > 0) setInventory(inv.map(i => ({ ...i, minStock: i.min_stock })));
       if (s?.length > 0) {
         setAllShifts(s);
         const op = s.find(x => x.status === 'open');
         if (op) setShift(op);
       }
-      if (ord?.length > 0) setShiftOrders(ord);
-      if (u?.length > 0) USERS = u; // Global update
+      if (ord?.length > 0) setShiftOrders(ord.map(o => ({
+        id: o.id, folio: o.folio, items: o.items, total: o.total, type: o.order_type,
+        ref: o.reference, note: o.note, status: o.status, paid: o.paid,
+        createdAt: o.created_at, payment: o.payment_method, cashReceived: o.cash_received,
+        change: o.change, tip: o.tip, user: o.user_name, shiftId: o.shift_id, discount: o.discount
+      })));
+      if (u?.length > 0) USERS = u; 
+      if (exp?.length > 0) setGastos(exp.map(e => ({ id: e.id, categoria: e.type, monto: e.amount, descripcion: e.note, fecha: e.expense_date, creadoPor: e.user_name, creadoEn: "" })));
+      if (pur?.length > 0) setPurchases(pur.map(x => ({ id: x.id, producto: x.product_name, cantidad: x.qty, costo: x.cost, total: x.total, fecha: x.purchase_date, ts: x.created_at_ts })));
+      if (fexp?.length > 0) setFixedExpenses(fexp.map(f => ({ id: f.id, nombre: f.name, monto: f.amount, dia: f.day_of_month, categoria: f.category })));
+      if (costs?.length > 0) setCostosHistory(costs.map(c => ({ id: c.id, productoId: c.product_id, anterior: c.old_cost, nuevo: c.new_cost, fecha: c.changed_at })));
+      if (rFolio?.[0]) setFolioCounter(rFolio[0].current_val);
+      if (rMg?.length > 0) {
+        const o = {};
+        rMg.forEach(m => o[m.id] = { name: m.name, type: m.type, options: m.options });
+        setMgs(o);
+      }
     }
     initSupabase();
   }, []);
@@ -1052,6 +1073,7 @@ function POSScreen({ products, mgs, shift, setShift, shiftOrders, setShiftOrders
     if (!items.length) return;
     const folio = String(folioCounter).padStart(4, "0");
     setFolioCounter(n => n + 1);
+    supabase.from('folio_counter').update({ current_val: folioCounter + 1 }).eq('id', 1).then();
     const order = {
       id: Date.now(), folio, items, total, type: orderType, ref, note,
       status: "pendiente",
@@ -1669,7 +1691,9 @@ function OrdersScreen({ shiftOrders, setShiftOrders, updateOrder, inventory, set
           item.prod.name.toLowerCase().includes(inv.name.toLowerCase())
         );
         if (idx !== -1) {
-          updated[idx] = { ...updated[idx], stock: Math.max(0, updated[idx].stock - item.qty) };
+          const newStock = Math.max(0, updated[idx].stock - item.qty);
+          updated[idx] = { ...updated[idx], stock: newStock };
+          supabase.from('inventory').update({ stock: newStock }).eq('id', updated[idx].id).then();
         }
       });
       return updated;
@@ -2312,8 +2336,8 @@ function InventoryScreen({ inventory, setInventory, user }) {
   const filtered = inventory.filter(i => i.name.toLowerCase().includes(search.toLowerCase()) || (i.barcode || "").includes(search));
   const save = () => {
     const d = { ...form, stock: +form.stock, minStock: +form.minStock, cost: +form.cost };
-    if (modal === "add") setInventory(prev => [...prev, { ...d, id: Date.now() }]);
-    else setInventory(prev => prev.map(i => i.id === d.id ? d : i));
+    if (modal === "add") { const np = { ...d, id: Date.now() }; setInventory(prev => [...prev, np]); supabase.from('inventory').insert({ ...np, min_stock: np.minStock }).then(); }
+    else { setInventory(prev => prev.map(i => i.id === d.id ? d : i)); supabase.from('inventory').update({ name: d.name, category: d.category, barcode: d.barcode, stock: d.stock, min_stock: d.minStock, unit: d.unit, cost: d.cost }).eq('id', d.id).then(); }
     setModal(null);
   };
   const st = (i) => i.stock === 0 ? { l: "Sin stock", c: "bdg-r" } : i.stock <= i.minStock ? { l: "Bajo", c: "bdg-o" } : { l: "OK", c: "bdg-g" };
@@ -2345,9 +2369,9 @@ function InventoryScreen({ inventory, setInventory, user }) {
                     <td style={{ fontFamily: "monospace", fontSize: 11 }}>{item.barcode || "—"}</td>
                     <td>
                       <div className="fx g8">
-                        <button className="qb" onClick={() => setInventory(p => p.map(i => i.id === item.id ? { ...i, stock: Math.max(0, i.stock - 1) } : i))}>−</button>
+                        <button className="qb" onClick={() => { const ns = Math.max(0, item.stock - 1); setInventory(p => p.map(i => i.id === item.id ? { ...i, stock: ns } : i)); supabase.from('inventory').update({stock: ns}).eq('id', item.id).then(); }}>−</button>
                         <span style={{ fontWeight: 700, minWidth: 40, textAlign: "center", fontSize: 13 }}>{item.stock} {item.unit}</span>
-                        <button className="qb" onClick={() => setInventory(p => p.map(i => i.id === item.id ? { ...i, stock: i.stock + 1 } : i))}>+</button>
+                        <button className="qb" onClick={() => { const ns = item.stock + 1; setInventory(p => p.map(i => i.id === item.id ? { ...i, stock: ns } : i)); supabase.from('inventory').update({stock: ns}).eq('id', item.id).then(); }}>+</button>
                       </div>
                     </td>
                     <td>{fmt(item.cost)}</td>
@@ -2355,7 +2379,7 @@ function InventoryScreen({ inventory, setInventory, user }) {
                     <td>
                       <div className="fx g8">
                         <button className="btn btn-outline btn-sm" onClick={() => { setForm({ ...item }); setModal("edit"); }}>✏️</button>
-                        {user.role === "admin" && <button className="btn btn-danger btn-sm" onClick={() => setInventory(p => p.filter(i => i.id !== item.id))}>✕</button>}
+                        {user.role === "admin" && <button className="btn btn-danger btn-sm" onClick={() => { setInventory(p => p.filter(i => i.id !== item.id)); supabase.from('inventory').delete().eq('id', item.id).then(); }}>✕</button>}
                       </div>
                     </td>
                   </tr>
@@ -2408,8 +2432,8 @@ function CatalogScreen({ products, setProducts, mgs, setMgs, user }) {
 
   const save = () => {
     const d = { ...form, price: +form.price, img };
-    if (modal === "add") setProducts(prev => [...prev, { ...d, id: Date.now() }]);
-    else setProducts(prev => prev.map(p => p.id === d.id ? d : p));
+    if (modal === "add") { const np = { ...d, id: Date.now() }; setProducts(prev => [...prev, np]); supabase.from('products').insert(np).then(); }
+    else { setProducts(prev => prev.map(p => p.id === d.id ? d : p)); supabase.from('products').update(d).eq('id', d.id).then(); }
     setModal(null);
   };
 
@@ -2441,14 +2465,14 @@ function CatalogScreen({ products, setProducts, mgs, setMgs, user }) {
                   <td>{(p.mgs || []).map(g => <span key={g} className="tag">{mgs[g]?.name || g}</span>)}</td>
                   <td>
                     <button className={`bdg ${p.active ? "bdg-g" : "bdg-r"}`} style={{ cursor: "pointer", border: "none" }}
-                      onClick={() => setProducts(prev => prev.map(pp => pp.id === p.id ? { ...pp, active: !pp.active } : pp))}>
+                      onClick={() => { const na = !p.active; setProducts(prev => prev.map(pp => pp.id === p.id ? { ...pp, active: na } : pp)); supabase.from('products').update({active: na}).eq('id', p.id).then(); }}>
                       {p.active ? "Activo" : "Inactivo"}
                     </button>
                   </td>
                   <td>
                     <div className="fx g8">
                       <button className="btn btn-outline btn-sm" onClick={() => { setForm({ ...p }); setImg(p.img || null); setModal("edit"); }}>✏️</button>
-                      {user.role === "admin" && <button className="btn btn-danger btn-sm" onClick={() => setProducts(prev => prev.filter(pp => pp.id !== p.id))}>✕</button>}
+                      {user.role === "admin" && <button className="btn btn-danger btn-sm" onClick={() => { setProducts(prev => prev.filter(pp => pp.id !== p.id)); supabase.from('products').delete().eq('id', p.id).then(); }}>✕</button>}
                     </div>
                   </td>
                 </tr>
@@ -2535,21 +2559,28 @@ function ModGroupsEditor({ mgs, setMgs }) {
         <div className="div" />
         <div className="fx g8">
           <input className="inp f1" placeholder="Nuevo grupo..." value={newGName} onChange={e => setNewGName(e.target.value)} style={{ fontSize: 12 }} />
-          <button className="btn btn-sage btn-sm" onClick={() => { if (!newGName) return; const id = newGName.toLowerCase().replace(/\s+/g,"_"); setMgs(p => ({ ...p, [id]: { id, name: newGName, type: "single", options: [] } })); setNewGName(""); setSel(id); }}>+</button>
+          <button className="btn btn-sage btn-sm" onClick={() => {
+            if (!newGName) return;
+            const id = newGName.toLowerCase().replace(/\s+/g,"_");
+            const newMg = { id, name: newGName, type: "single", options: [] };
+            setMgs(p => ({ ...p, [id]: newMg }));
+            supabase.from('modifier_groups').insert(newMg).then();
+            setNewGName(""); setSel(id);
+          }}>+</button>
         </div>
       </div>
       {g && (
         <div className="card">
           <div style={{ fontWeight: 700, marginBottom: 8, color: "var(--bark)" }}>{g.name}</div>
           <div className="fx g8 mb12">
-            <button className={`mb-btn ${g.type === "single" ? "sel" : ""}`} onClick={() => setMgs(p => ({ ...p, [g.id]: { ...g, type: "single" } }))}>1 opción</button>
-            <button className={`mb-btn ${g.type === "multi" ? "sel" : ""}`} onClick={() => setMgs(p => ({ ...p, [g.id]: { ...g, type: "multi" } }))}>Varios</button>
+            <button className={`mb-btn ${g.type === "single" ? "sel" : ""}`} onClick={() => { setMgs(p => ({ ...p, [g.id]: { ...g, type: "single" } })); supabase.from('modifier_groups').update({ type: "single" }).eq('id', g.id).then(); }}>1 opción</button>
+            <button className={`mb-btn ${g.type === "multi" ? "sel" : ""}`} onClick={() => { setMgs(p => ({ ...p, [g.id]: { ...g, type: "multi" } })); supabase.from('modifier_groups').update({ type: "multi" }).eq('id', g.id).then(); }}>Varios</button>
           </div>
           {g.options.map(opt => (
             <div key={opt.id} className="fx g8" style={{ padding: "6px 10px", background: "var(--chukum-lt)", borderRadius: 7, marginBottom: 6 }}>
               <span className="f1" style={{ fontSize: 13 }}>{opt.name}</span>
               {opt.priceAdj > 0 && <span style={{ color: "var(--terra)", fontWeight: 700, fontSize: 12 }}>+{fmtInt(opt.priceAdj)}</span>}
-              <button className="qb" style={{ width: 20, height: 20, fontSize: 11 }} onClick={() => setMgs(p => ({ ...p, [g.id]: { ...g, options: g.options.filter(o => o.id !== opt.id) } }))}>✕</button>
+              <button className="qb" style={{ width: 20, height: 20, fontSize: 11 }} onClick={() => { const nOpts = g.options.filter(o => o.id !== opt.id); setMgs(p => ({ ...p, [g.id]: { ...g, options: nOpts } })); supabase.from('modifier_groups').update({ options: nOpts }).eq('id', g.id).then(); }}>✕</button>
             </div>
           ))}
           <div className="div" />
@@ -2559,7 +2590,9 @@ function ModGroupsEditor({ mgs, setMgs }) {
             <button className="btn btn-sage btn-sm" onClick={() => {
               if (!newOptN) return;
               const opt = { id: `o${Date.now()}`, name: newOptN, priceAdj: +newOptP };
-              setMgs(p => ({ ...p, [g.id]: { ...g, options: [...g.options, opt] } }));
+              const nOpts = [...g.options, opt];
+              setMgs(p => ({ ...p, [g.id]: { ...g, options: nOpts } }));
+              supabase.from('modifier_groups').update({ options: nOpts }).eq('id', g.id).then();
               setNewOptN(""); setNewOptP(0);
             }}>+</button>
           </div>
@@ -2772,9 +2805,9 @@ function GastosScreen({ gastos, setGastos, user }) {
 
   const save = () => {
     if (!form.descripcion || !form.monto) return;
-    setGastos(prev => [{
-      ...form, id: Date.now(), monto: +form.monto, creadoEn: fullDT(), creadoPor: user.name,
-    }, ...prev]);
+    const g = { ...form, id: Date.now(), monto: +form.monto, creadoEn: fullDT(), creadoPor: user.name };
+    setGastos(prev => [g, ...prev]);
+    supabase.from('expenses').insert({ id: g.id, type: g.categoria, amount: g.monto, note: g.descripcion, expense_date: g.fecha, created_at_ts: Date.now(), user_name: g.creadoPor }).then();
     setModal(false);
     resetForm();
   };
@@ -3094,12 +3127,18 @@ function BalanceScreen({ allShifts, purchases, setPurchases, fixedExpenses, setF
   const updatePItem = (i, k, v) => setPForm(f => ({ ...f, items: f.items.map((it, idx) => idx === i ? { ...it, [k]: v } : it) }));
   const savePurchase = () => {
     const total = pForm.items.reduce((s, i) => s + +i.qty * +i.cost, 0);
-    setPurchases(prev => [{ ...pForm, id: Date.now(), total }, ...prev]);
+    const p = { ...pForm, id: Date.now(), total };
+    setPurchases(prev => [p, ...prev]);
+    p.items.forEach((it, idx) => {
+      supabase.from('purchases').insert({ product_name: it.name, qty: it.qty, cost: it.cost, total: it.qty * it.cost, purchase_date: p.date, created_at_ts: Date.now() }).then();
+    });
     setPurchaseModal(false);
     setPForm({ supplier: "", date: isoDate(), items: [{ name: "", qty: 1, unit: "pz", cost: 0 }] });
   };
   const saveExpense = () => {
-    setFixedExpenses(prev => [{ ...eForm, id: Date.now(), amount: +eForm.amount }, ...prev]);
+    const e = { ...eForm, id: Date.now(), amount: +eForm.amount };
+    setFixedExpenses(prev => [e, ...prev]);
+    supabase.from('fixed_expenses').insert({ name: e.name, amount: e.amount, day_of_month: parseInt(e.date.split('-')[2]) || 1, category: e.category }).then();
     setExpenseModal(false);
     setEForm({ name: "", category: "Nómina", amount: 0, date: isoDate(), notes: "" });
   };
