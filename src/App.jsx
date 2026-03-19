@@ -446,14 +446,14 @@ function LoginScreen({ onLogin }) {
 
   const handleKey = (k) => {
     if (k === "del") { setPin(p => p.slice(0, -1)); setErr(false); return; }
-    if (pin.length >= 4) return;
-    const next = pin + k;
-    setPin(next);
-    if (next.length === 4) {
-      const u = USERS.find(u => u.pin === next);
+    if (k === "ok") {
+      const u = USERS.find(u => u.pin === pin);
       if (u) { onLogin(u); setPin(""); }
       else { setErr(true); setTimeout(() => { setPin(""); setErr(false); }, 700); }
+      return;
     }
+    if (pin.length >= 8) return;
+    setPin(pin + k);
   };
 
   return (
@@ -463,17 +463,19 @@ function LoginScreen({ onLogin }) {
         <div className="lc">
           <div className="ll">mesa teresa</div>
           <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 20 }}>Sistema POS · Ingresa tu PIN</div>
-          <div className="pn">
-            {[0,1,2,3].map(i => <div key={i} className={`pd ${i < pin.length ? "f" : ""}`} style={err ? { borderColor: "#e05555", background: i < pin.length ? "#e05555" : "" } : {}} />)}
+          <div className="pn" style={{ display: "flex", gap: 10, justifyContent: "center", marginBottom: 12 }}>
+            {Array.from({ length: Math.max(4, pin.length) }).map((_, i) => (
+              <div key={i} className={`pd ${i < pin.length ? "f" : ""}`} style={err ? { borderColor: "#e05555", background: i < pin.length ? "#e05555" : "" } : {}} />
+            ))}
           </div>
           {err && <div style={{ color: "#e05555", fontSize: 12, marginBottom: 6 }}>PIN incorrecto</div>}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginTop: 12 }}>
-            {["1","2","3","4","5","6","7","8","9","","0","⌫"].map((k, i) => (
-              <button key={i} className="pk" style={k === "" ? { visibility: "hidden" } : {}}
-                onClick={() => k && handleKey(k === "⌫" ? "del" : k)}>{k}</button>
+            {["1","2","3","4","5","6","7","8","9","✓","0","⌫"].map((k, i) => (
+              <button key={i} className="pk" style={k === "✓" ? { background: "var(--sage)", color: "white" } : {}}
+                onClick={() => handleKey(k === "⌫" ? "del" : k === "✓" ? "ok" : k)}>{k}</button>
             ))}
           </div>
-          <div style={{ marginTop: 18, fontSize: 11, color: "var(--muted)" }}>Admin: 1234 · Gerente: 5678 · Cajero: 9090</div>
+          <div style={{ marginTop: 18, fontSize: 11, color: "var(--muted)" }}>Pin variable. Presiona ✓ para entrar.</div>
         </div>
       </div>
     </>
